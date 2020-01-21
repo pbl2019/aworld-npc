@@ -6,7 +6,7 @@ from keras import losses
 from keras.models import Sequential
 from keras.models import model_from_config
 from keras.models import model_from_json
-from keras.layers import Dense
+from keras.layers import Dense, Conv2D, Flatten, Reshape
 from keras.optimizers import RMSprop
 from keras.utils import plot_model
 from keras import backend as K
@@ -23,6 +23,7 @@ EPOCH = 1000
 BATCH_SIZE = 32
 CLEAR_TURN = 100
 GAMMA = 0.99
+SHAPE = (700, 700, 3)
 	
 def main(args):
 	env = environment.Env()
@@ -31,10 +32,12 @@ def main(args):
 		model.load_weights('model.h5')
 	else:
 		model = Sequential()
-		model.add(Dense(100,activation="relu",input_dim=100))
+		model.add(Reshape((700, 700, 3, 1) , input_shape = SHAPE))
+		model.add(Conv2D(5, (7, 7), padding='same', activation='relu'))
+		model.add(Flatten())
 		model.add(Dense(50,activation="relu"))
 		model.add(Dense(50,activation="relu"))
-		model.add(Dense(4,activation="linear"))
+		model.add(Dense(len(environment.Env.acts),activation="linear"))
 	target = clone_model(model)
 	data = deque(maxlen=200)
 
@@ -67,12 +70,12 @@ def main(args):
 	
 			if done:
 				if t > CLEAR_TURN:
-					data.append((observation.reshape((1,100)),action,1,np.zeros((1,100))))
+					data.append((observation,action,1,np.zeros(SHAPE)))
 					if "-w" in args:
 						open('model.json', 'w').write(model.to_json())
 						model.save_weights('model.h5')
 				else:
-					data.append((observation.reshape((1,100)),action,-1,np.zeros((1,100))))
+					data.append((observation,action,-1,np.zeros(SHAPE)))
 				
 				print("{} times : finished after {} timestamps {}".format(episode,t+1,y))
 	
@@ -81,7 +84,7 @@ def main(args):
 
 				break
 			elif len(observation) > 0 and len(nextObservation) > 0:
-				data.append((observation.reshape((1,100)),action,0,nextObservation.reshape((1,100))))
+				data.append((observation,action,0,nextObservation))
 			observation = nextObservation
 
 		if BATCH_SIZE < len(data):
@@ -115,11 +118,11 @@ def clone_model(model, custom_objects={}):
     return clone
 
 def getAction(model,observation,episode):
-	y = model.predict(observation.reshape((1,100)))
+	y = model.predict(observation)
 	if (0.01 +0.9/(1.0 + episode)) <= np.random.uniform(0,1):
 		return np.argmax(y) , y
 	else:
-		return np.random.choice([0, 1, 2, 3, 4]) , y
+		return np.random.randInt(5) , y
 
 def learn(model,target,data):
 	y_pred = []
@@ -127,12 +130,14 @@ def learn(model,target,data):
 	for d in data:
 		state,action,reward,nextState = d
 		y = model.predict(state)
+		print("y=", y)
+		
 		if not (nextState == np.zeros(state.shape)).all(axis=1):
 			y[0][action] = reward + GAMMA * np.max(target.predict(nextState)[0])
 		else:
 			y[0][action] = reward
-		y_pred.append(state.reshape(100))
-		y_true.append(y.reshape(4))
+		y_pred.append(state)
+		y_true.append(y.reshape(len(Env.acts)))
 	model.fit(np.array(y_pred),np.array(y_true),batch_size=BATCH_SIZE,verbose=0,epochs=1)
 
 main(sys.argv)
